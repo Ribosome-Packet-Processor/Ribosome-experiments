@@ -119,7 +119,7 @@ def port_stats_timer():
     threading.Timer(1, port_stats_timer).start()
 
 
-run_pd_rpc(os.path.join(os.environ['HOME'], "labs/multicast_tofino/run_pd_rpc/setup.py"))
+run_pd_rpc(os.path.join(os.environ['HOME'], "labs/Ribosome-experiments/multicast_tofino/run_pd_rpc/setup.py"))
 
 p4.pipe.Ingress.enable_recirculation.add(f1=ENABLE_RECIRCULATION, REGISTER_INDEX=0)
 p4.pipe.Ingress.drop_threshold.add(f1=DROP_THRESHOLD, REGISTER_INDEX=0)
