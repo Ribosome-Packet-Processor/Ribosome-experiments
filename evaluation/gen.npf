@@ -1,0 +1,472 @@
+%info
+Generate some traffic for 10 seconds and print various metrics
+
+Source:
+--tags trace pcap: Use the caida trace.
+--tags udpgen replay maxrate: Generate UDP flow
+--tags prate --variables GEN_THREADS=12 : Generate UDP flows at a given rate
+
+Rate (not with trace):
+Normally the request rate is set in packets with GEN_RATE=1000 for instance.
+--tags autorate --variables GEN_RATE_GPBS=100: will allow to compute automatically the good rate for GEN_RATE according to the packet length, recirculation and multicast
+
+Optional features:
+--tags perf : Will profile and display cache miss stats about the NF
+
+%variables
+
+//UPDATE THIS PART ACCORDING TO YOUR CONFIGURATION
+
+TOFINO_SDE=/home/tofino/saab-9.7.0/BF/bf-sde-9.7.0/
+MULTICAST_SDE=/home/tofino/bf-sde-9.8.0/
+
+RDMA_BUILD_DIR=/home/tcaiazzi/Code/Ribosome-RDMA-Server-Agent/build
+
+// OTHER VARIABLES
+
+SPLITSIZE=64
+CBPSMUL=1
+
+-trace:GEN_LENGTH=1024
+GEN_DUMP=-1
+trace:GEN_DUMP=2
+GEN_FLOWS=16000
+GEN_BURST=32
+GEN_DESC=1024
+RX_QUEUES=1
+PAUSE=full
+-autorate,-maxrate:GEN_RATE=[0.0007-11666666.666#1666666.666]
+autorate:GEN_RATE_GBPS={10,20,30,40,50,60,70,80,90}
+maxrate:GEN_RATE=-1
+prate:GEN_PIPELINE=0
+prate:GEN_MULTI_TRACE=1
+replay|prate:GEN_SEQUENTIAL=1
+prate:LIMIT=70000000
+prate:LIMIT_TIME=15
+prate:GEN_NOREWRITE_ETHER=1
+GEN_THREADS=8
+GEN_MULTI_TRACE=1
+NF_W=1
+NF_N=0
+NF_S=1
+GEN_BIN=click
+NF_CLICK_DIR=/home/hamid/workspace/rdma/nf/
+NF_CPU=8
+TIMEOUT=0
+bench:BENCH=1
+-old:NF_NDESC=2048
+-old:NF_BIN=packetmill
+-old:MCAST=1
+-old:RECIRCULATE=2
+trace:trace=/mnt/traces/caida-18/summaries/caida18-16x
+trace,pcap:trace=/mnt/traces/caida-18/caida18-16x.pcap
+trace,pcap,forcedudp:trace=/mnt/traces/caida-18/caida18-16x.forcedudp.pcap
+trace,pcap,caida32x,forcedudp:trace=/mnt/traces/caida-18/caida18-32x.forcedudp.pcap
+trace,pcap,udpdual,forcedudp:trace=/mnt/traces/udpdual/udpdual.pcap
+trace,pcap,nofrag:trace=/mnt/traces/caida-18/caida18-16x.nofrag.pcap
+trace,forcedudp,oneqp:trace=/mnt/traces/caida-18/test8.pcap
+trace,pcap:GEN_DUMP=0
+CAPA=32000000
+
+gdb:GDB=gdb -ex run -ex "signal 2" -ex bt -batch -args
+nflim:NF_CPU=1
+{
+    nflim:NF_W=[[1-100#]]
+    nflim:NF_S=[[1-100#]]
+    nflim:NF_N=[[1-100#]]
+}
+
+
+REF_MAX_BURST=32
+REF_MAX_TX_BURST=32
+REF_BUFF_TIME=64
+REF_OUT_QUEUE=
+soq:REF_OUT_QUEUE=, N_QUEUES 1
+
+
+COPY_ZERO=false
+zero:COPY_ZERO=true
+SCALE=SHARE
+
+%autorate:late_variables
+GEN_RATE=EXPAND($(( int( $GEN_RATE_GBPS * 1000000000 / 8 / $GEN_LENGTH / $GEN_THREADS / $MCAST / $RECIRCULATE ) )) )
+prate:GEN_RATE=EXPAND($(( int( $GEN_RATE_GBPS * 1000000000 / 8 / $GEN_LENGTH / $MCAST / $RECIRCULATE ) )) )
+
+%config
+//All sorts of configration variables
+timeout=120
+accept_zero={NFRXDROPPED,.*DROPPED.*,NFPHYDROPPED,RX,C_BPS,C_PPS}
+var_unit={TX:bps,RX:bps,RXCOUNT: ,RATE:pps,LINKRATE:bps}
+var_name={LAT50: Median latency (μs), LAT99:99th percentile latency (μs), GEN_RATE:Input Packet Rate (Mpps),CBPS_FIN:Output throughput (Gbps),C_BPS:Output throughput (Gbps),C_PPS:Output packet rate (Mpps),FRATE:NF packet rate (Mpps),GEN_LENGTH:Packet length (B),GEN_RATE_GBPS:Input Rate (Gbps),NFDROPPEDPC:Traffic dropped by NF (%),NF_S:Size of static data in memory (MB),NF_CPU:CPU cores on the NF,BENCHRES:CPU Copy memory bandwidth (MB/s)}
+var_divider={GEN_RATE:333333.333,CBPS_FIN:1000000000,C_BPS:1000000000,FRATE:1000000,C_PPS:1000000,GEN_RATE_GBPS:1,NFDROPPEDPC:0.01}
+recirculate:var_divider={GEN_RATE:41666.666}
+var_format={GEN_RATE:%d,C_BPS:%d,FRATE:%d,NFDROPPEDPC:%d,CBPS_FIN:%d,C_PPS:%d,C_BPS:%d}
+nflim:n_runs=1
+var_lim={result-C_BPS:0-320, LATENCY:0-200, LAT99:0-550, LAT50:0-130}
+avg:var_lim+={result-FRATE:0-40}
+
+//The old generator, not needed anymore. Just maybe easier to script for Tommaso and Mariano as it's the one they use in tests?
+%-prate,-trace,-nogen,-replay:script@client deps=fastclick sudo=true waitfor=TOFINO_READY delay=12
+killall -9 click
+cd /home/tom/workspace/rdma/
+if [ $GEN_RATE -gt 0 ] ; then
+    $GDB $GEN_BIN --dpdk -l 0-15 -a ${self:0:pci}  -- gen-rated-mt.click rate=${GEN_RATE} length=${GEN_LENGTH}
+else
+    $GDB $GEN_BIN --dpdk -l 0-7 -a ${self:0:pci}  -- gen-mt.click rate=${GEN_RATE} length=${GEN_LENGTH}
+fi
+
+//Importing the right generator as mentioned in the info section
+%replay:import@client fastclick-replay-single-mt GEN_DUMP=-1 delay=40 waitfor=TOFINO_READY
+%prate:import@client fastclick-play-single-mt GEN_DUMP=-1 delay=40 waitfor=TOFINO_READY
+%trace:import@client fastclick-play-single-mt delay=40 waitfor=TOFINO_READY GEN_PIPELINE=0 GEN_THREADS=1 PKTGEN_REPLAY_COUNT=1
+
+//Call perf to profile the NF with --tags perf
+%perf:import@nf perf-stat N_CORES=1 PERF_TIME=5 delay=40 waitfor=TOFINO_READY
+
+
+//Script that loads the NF
+%script@nf sudo=true delay=5
+cp nf-dynamic.click $NF_CLICK_DIR
+cp ref_rules_spec $NF_CLICK_DIR
+cd $NF_CLICK_DIR
+
+echo "RESULT-CBPS-MUL $CBPSMUL"
+
+$GDB fastclick/bin/$NF_BIN --dpdk -l 0-63 -a 3b:00.1,mprq_en=1  -- nf-dynamic.click
+
+//Tofino matters
+%sendfile@tofino TOFINO_OPEN
+%sendfile@tofino TOFINO_OPEN_4
+
+%init@tofino sudo=true
+export SDE=${TOFINO_SDE}
+export SDE_INSTALL=${TOFINO_SDE}install/
+modprobe i2c-dev 
+modprobe i2c-i801
+$SDE_INSTALL/bin/bf_kdrv_mod_load $SDE_INSTALL
+echo "Loaded!"
+
+%script@tofino background=true autokill=false title=tofino-main sudo=true
+export SDE=${TOFINO_SDE}
+export SDE_INSTALL=${TOFINO_SDE}install/
+killall -9 run_switchd.sh
+killall -9 run_bfshell.sh
+killall -9 bfshell
+killall -9 bf_switchd
+echo "EVENT TOFINO_INIT"
+$SDE/run_switchd.sh -p ribosome
+
+%fake:script@tofino32 sudo=true title=tofino-old background=true
+export SDE=${MULTICAST_SDE}
+export SDE_INSTALL=${MULTICAST_SDE}install/
+killall -9 run_switchd.sh
+killall -9 run_bfshell.sh
+killall -9 bfshell
+killall -9 bf_switchd
+echo "EVENT TOFINOOLD_INIT"
+$SDE/run_switchd.sh -p ribosome_mcast
+echo "TOFINO FINISHED 32"
+
+%fake:script@tofino32 sudo=true title=tofino-old-setup waitfor=TOFINOOLD_INIT delay=5 background=true autokill=false
+echo "32 init"
+sleep 10
+export SDE=${MULTICAST_SDE}
+export SDE_INSTALL=${MULTICAST_SDE}install/
+echo "Opening ports..."
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+echo "EVENT TOFINO32_READY"
+
+$SDE/run_bfshell.sh -i -b /home/tofino/labs/Ribosome-experiments/multicast_tofino/setup.py
+
+%script@tofino background=true autokill=false waitfor=TOFINO_INIT delay=5 title=tofino-setup sudo=true
+sleep 10
+export SDE=${TOFINO_SDE}
+export SDE_INSTALL=${TOFINO_SDE}install/
+echo "Opening ports..."
+echo "EVENT TOFINO_READY"
+
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+echo "EVENT TOFINO_READY"
+$SDE/run_bfshell.sh -b /home/tofino/labs/Ribosome-P4/setup.py
+
+%-fake,-nordma:script@client sudo=true background=true autokill=false waitfor=TOFINO_READY delay=8
+echo "Launching client"
+echo "CLIENT" > /tmp/client.log
+killall client
+cd /home/tcaiazzi/Code/rdma-buffer/cmake-build-release-sweden/
+./client 192.168.40.5 12345
+
+
+
+//RDMA servers
+%-fake:exit@client sudo=true
+killall -9 client
+
+%-nordma:script@server0 sudo=true delay=30 background=true autokill=true waitfor=TOFINO_READY
+echo "Launching server" | tee -a /tmp/server.log
+killall server
+cd ${RDMA_BUILD_DIR}
+ifconfig cx5n0if0 192.168.40.11
+sudo numactl -m 0 -N 0  ./server mlx5_0 2 0 64 1 1 &>> /tmp/server.log
+
+//%-nordma:script@server1 sudo=true delay=30 background=true autokill=true waitfor=TOFINO_READY
+//echo "Launching server" | tee -a /tmp/server.log
+//killall server
+//cd /home/tcaiazzi/Code/rdma-buffer/cmake-build-release-sweden/
+//./server 12345 &>> /tmp/server.log
+//cd /home/tcaiazzi/Code/rdma-buffer/cmake-build-release-sweden-cluster-1
+//ifconfig cx5n0if0 192.168.40.12
+//sudo numactl -m 0 -N 0  ./server mlx5_0 1 0 64 1 1 &>> /tmp/server.log
+
+%-nordma:script@server2 sudo=true delay=30 background=true autokill=true waitfor=TOFINO_READY
+echo "Launching server" | tee -a /tmp/server.log
+killall server
+cd ${RDMA_BUILD_DIR}
+ifconfig cx5_1if1 192.168.40.13
+sudo numactl -m 0 -N 0  ./server mlx5_3 0 0 64 1 1 &>> /tmp/server.log
+
+%-nordma:script@server3 sudo=true delay=30 background=true autokill=true waitfor=TOFINO_READY
+echo "Launching server" | tee -a /tmp/server.log
+killall server
+cd ${RDMA_BUILD_DIR}
+ifconfig cx5_1if0 192.168.40.14
+sudo numactl -m 1 -N 1  ./server mlx5_4 3 1 64 1 1 &>> /tmp/server.log
+
+%exit@server0 sudo=true
+killall -9 server
+
+%exit@server1 sudo=true
+killall -9 server
+
+%exit@server2 sudo=true
+killall -9 server
+
+%exit@server3 sudo=true
+killall -9 server
+
+
+//Computing automatically the average of time series
+%pyexit
+import numpy as np
+from itertools import dropwhile,takewhile
+
+total={}
+for kind,aresults in KIND_RESULTS.items():
+    fs=set()
+    for time,results in aresults.items():
+        first=False
+        for kind,result in results.items():
+            t=kind[1:]
+            if t in total:
+                total[kind[1:]].append(result)
+            else:
+                total[t] = []
+                fs.add(time)
+    for f in fs:
+        del aresults[f]
+
+for k,vs in total.items():
+    med = np.mean(vs)
+#    print(k,vs,med)
+    fil=dropwhile(lambda x: x<med/2, vs)
+
+    fil=takewhile(lambda x: x>med/2, fil)
+    RESULTS[k] = list(fil)[1:-1]
+#    print(RESULTS[k,fil])
+
+if 'RX' in RESULTS and 'TX' in RESULTS:
+    RESULTS['FWDROP'] = np.mean(RESULTS['TX']) - np.mean(RESULTS['RX'])
+
+
+RESULTS['CBPS_FIN'] = [np.mean(np.array(RESULTS['C_BPS'])) * (np.mean(np.array(RESULTS['CBPS-MUL'])) ) ]
+RESULTS['REF-AVG-BU'] = (RESULTS['REF_BU0'] + RESULTS['REF_BU1'] + RESULTS['REF_BU2'] + RESULTS['REF_BU3'] + RESULTS['REF_BU4'] + RESULTS['REF_BU5'] + RESULTS['REF_BU6'] + RESULTS['REF_BU7'])/8
+
+//Compute derivate results
+%pypost
+import numpy as np
+for run, RESULTS in ALL_RESULTS.items():
+    ttime = np.mean(np.array(RESULTS['NFPHYCOUNT'])) / np.mean(np.array(RESULTS['OFRXPPS']))
+    if 'TOTAL-LLC-LOADS' in RESULTS:
+        RESULTS['NFLLCLOADSPP'] = [np.mean(np.array(RESULTS['TOTAL-LLC-LOADS'])) / 5 / (np.mean(np.array(RESULTS['FRATE'])) ) ]
+    if 'TOTAL-CACHE-MISSES' in RESULTS:
+        RESULTS['NFCACHEMISSESPP'] = [np.mean(np.array(RESULTS['TOTAL-CACHE-MISSES'])) / 5 / (np.mean(np.array(RESULTS['FRATE'])) ) ]
+    if 'NFPHYDROPPED' in RESULTS and 'NFRXDROPPED' in RESULTS:
+        RESULTS['NFTOTDROPPED'] = [ np.mean(np.array(RESULTS['NFPHYDROPPED'])) + np.mean(np.array(RESULTS['NFRXDROPPED']))  ]
+        RESULTS['NFDROPPEDPS'] = np.array(RESULTS['NFTOTDROPPED']) / ttime
+
+        RESULTS['NFDROPPEDPC'] = np.array(RESULTS['NFTOTDROPPED']) / np.array(RESULTS['NFPHYCOUNT'])
+
+
+//Just to get nice graphs
+%import graph-beautiful
+
+
+//NF configuration file
+%file@nf nf-dynamic.click
+DPDKInfo(1524285)
+JiffieClock
+
+elementclass Reframer {
+    
+//    input[0] -> sizecls :: Classifier(11/00, -)[0]
+//    -> bypassc :: Counter
+//   -> lencls :: CheckLength(200)
+//    -> output;
+  
+//    lencls[1] -> lcounter :: Counter -> output;
+   
+    $(( "\n".join(["sc%d :: Counter -> SFMaker(DELAY $REF_BUFF_TIME, MAX_BURST $REF_MAX_BURST, MAX_TX_BURST $REF_MAX_TX_BURST) -> Unstrip(14) -> MinBatch(32) -> EtherTag(SERVERS 4, QPCOUNT 64, STARTINDEX %d, MAX_BATCH 4, CORES $NF_CPU) -> bu%d :: BurstStats -> output;" % (i+1, i*64/$NF_CPU, i) for i in range($NF_CPU)]) ))
+
+    input[0] ->
+//    sizecls[1] ->
+    Strip(14) ->
+    MarkIPHeader -> ${MANAGER}(CAPACITY $CAPA) ->
+    cr :: ExactCPUSwitch;
+    
+    $(( "\n".join(["cr[%d] -> sc%d;" % (i,i+1) for i in range($NF_CPU)]) ))    
+    
+}
+
+    fd0 :: FromDPDKDevice(0, SCALE $SCALE, PROMISC true, PAUSE none, MAXTHREADS $NF_CPU, NUMA 1, VERBOSE 99, NDESC $NF_NDESC, BURST 64, RSS_AGGREGATE true)
+    // fd0 :: FromDPDKDevice(0, SCALE $SCALE, PROMISC true, PAUSE none, MAXTHREADS $NF_CPU, NUMA 1, VERBOSE 99, NDESC $NF_NDESC, BURST 64, RSS_AGGREGATE true, MODE flow, FLOW_RULES_FILE ref_rules_spec, FLOW_ISOLATE false)
+    -> Classifier(12/0800)
+    -> MarkIPHeader(OFFSET 14)
+    -> Print
+    -> bub :: BurstStats
+
+$(( "    -> WorkPackage(W $NF_W, N $NF_N, S $NF_S)" if $NF_N > 0 else "" ))
+
+$(( "    -> man :: $MANAGER(CAPACITY $CAPA) " if "$NF_FNT" == "STATE" else "" ))
+$(( "    -> man :: $MANAGER(CAPACITY $CAPA, TIMEOUT $TIMEOUT) -> FlowRateLimiter(RATE 10000) " if "$NF_FNT" == "RATE" else "" ))
+$(( "    -> man :: $MANAGER(CAPACITY $CAPA, TIMEOUT $TIMEOUT) -> FlowIPNAT(10.0.0.1) " if "$NF_FNT" == "NAT" else "" ))
+$(( "    -> man :: $MANAGER(CAPACITY $CAPA, TIMEOUT $TIMEOUT) -> FlowCounter" if "$NF_FNT" == "MON" else "" ))
+$(( "    -> man :: $MANAGER(CAPACITY $CAPA) -> FlowIPLoadBalancer(VIP 10.0.0.100, DST 10.0.0.1, DST 10.0.0.2, DST 10.0.0.3) " if "$NF_FNT" == "LB" else "" ))
+// $(( "    -> ref :: Reframer" if "$NF_FNT" == "REF" else "-> MinBatch(32)" ))
+
+    -> EtherMirror
+//    -> afterRef :: Counter(NO_RATE true)
+    -> bua :: BurstStats
+// $(( "    -> Pad(250, ZERO $COPY_ZERO)" if "$NF_CPU" == "16" and "$NF_FNT" == "REF" else "" ))
+//    -> c :: AverageCounterIMP()
+    -> td0 :: ToDPDKDevice(0, VERBOSE 99, TIMEOUT -1 $REF_OUT_QUEUE, BLOCKING false);
+
+//Script that runs every seconds
+Script(TYPE ACTIVE,
+        set use 0,
+        label loop,
+        set t $(now),
+        print "NF-$t-RESULT-NFRATE "$(c.rate),
+        print "NF-$t-RESULT-NFLINKRATE "$(c.link_rate),
+        print "NF-$t-RESULT-NFPHYDROPPED "$(fd0.xstats rx_phy_discard_packets),
+        print "NF-$t-RESULT-NFRXDROPPED "$(fd0.hw_dropped),
+        set nuse $(add $(useful_kcycles)),
+        set diff $(sub $nuse $use),
+        set use $nuse,
+        print "NF-$t-RESULT-NFUSEFUL "$diff,
+        read load,
+        write c.reset,
+        wait 1s,
+        gotoa loop);
+
+//Script that runs at the end of the experiment
+DriverManager(
+                read fd0.rss_reta,
+                wait,
+                read fd0.xstats,
+                print "RESULT-NFFLOWS "$(man.count),
+                print "RESULT-NFRXCOUNT "$(fd0.hw_count),
+                print "RESULT-NFPHYCOUNT "$(fd0.xstats rx_phy_packets),
+                print "RESULT-NFPHYDROPPED "$(fd0.xstats rx_phy_discard_packets),
+                print "RESULT-NFRXDROPPED "$(fd0.hw_dropped),
+                print "RESULT-NFTWCOUNT "$(td0.hw_count),
+                print "RESULT-NFCYCLESPP "$(div $(mul $(add $(useful_kcycles)) 1000) $(fd0.count)),
+                print "RESULT-REF_BUA $(bua.average)",
+                print "RESULT-REF_BUB $(bub.average)",
+                print "RESULT-REF_BU0 $(ref/bu0.average)",
+                print "RESULT-REF_BU1 $(ref/bu1.average)",
+                print "RESULT-REF_BU2 $(ref/bu2.average)",
+                print "RESULT-REF_BU3 $(ref/bu3.average)",
+                print "RESULT-REF_BU4 $(ref/bu4.average)",
+                print "RESULT-REF_BU5 $(ref/bu5.average)",
+                print "RESULT-REF_BU6 $(ref/bu6.average)",
+                print "RESULT-REF_BU7 $(ref/bu7.average)",
+                print "RESULT-REF_BYPASSED $(ref/bypassc.count)",
+                print "RESULT-REF_SERVED   $(served.count)",
+                print "RESULT-REF_AFTER_C  $(afterRef.count)",
+                print "RESULT-REF_LARGES   $(ref/lcounter.count)",
+                print "END"
+                );
+
+%file@nf ref_rules_spec
+flow create 1 priority 1 ingress pattern eth src spec 00:00:00:00:00:00 src mask 00:00:00:00:00:01 / end actions rss / end
+$(( "\n".join(["flow create 1 priority 0 ingress pattern eth dst spec 00:00:00:00:%02x:00 dst mask 00:00:00:00:%02x:00 / end actions queue index %d / end" % (i, ${NF_CPU}-1, i) for i in range($NF_CPU) ]) ))
+
+%file@client client_rules
+flow create 0 ingress pattern eth src is 00:00:00:00:00:00 / end actions queue index 0 / end
+flow create 0 ingress pattern eth src is 00:00:00:00:00:01 / end actions queue index 1 / end
+flow create 0 ingress pattern eth src is 00:00:00:00:00:02 / end actions queue index 2 / end
+flow create 0 ingress pattern eth src is 00:00:00:00:00:03 / end actions queue index 3 / end
+
+%bench:script@server2 sudo=true waitfor=GEN_BEGIN autokill=false
+cd ~/workspace/memory-bandwidth-benchmarks/
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/intel/oneapi/compiler/2022.0.2/linux/compiler/lib/intel64_lin/
+export PATH=$PATH:/opt/intel/oneapi/compiler/2022.0.2/linux/bin/intel64/
+./run.sh
+echo "RESULT-BENCHRES $(cat Intel-Xeon-Gold-6140-CPU--2.30GHz/nt/stream_avx512_36t.log | grep Copy | tr -s ' ' | cut -d' ' -f 2)"
+
+// %import@server2 dev_rate NIC=1 delay=2 autokill=false

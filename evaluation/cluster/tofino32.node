@@ -1,0 +1,17 @@
+user=tofino
+addr=192.168.3.203
+path=/tmp/
+nfs=0
+0:pci=0000:06:00.0
+0:ifname=ens1
+0:mac=84:c7:8f:00:ae:b0
+0:ip=
+1:pci=0000:04:00.0
+1:ifname=enp4s0f0
+1:mac=84:c7:8f:00:ae:b2
+1:ip=
+2:pci=0000:04:00.1
+2:ifname=enp4s0f1
+2:mac=84:c7:8f:00:ae:b3
+2:ip=
+

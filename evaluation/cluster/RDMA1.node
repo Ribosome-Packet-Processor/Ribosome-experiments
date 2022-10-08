@@ -1,0 +1,11 @@
+addr=<IP address of server for NPF to connect with SSH>
+
+0:pci=<Port PCI address. eg: 0000:18:00.0>
+0:ifname=<Port interface name. eg: enp24s0f0>
+0:mac=<Port MAC address. eg: bc:97:e1:45:9e:c6>
+0:ip=<Port IP address. eg: 192.30.18.71>
+
+1:pci=
+1:ifname=
+1:mac=
+1:ip=
