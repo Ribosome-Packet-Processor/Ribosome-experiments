@@ -1,4 +1,4 @@
-# Ribosome-experiments
+# Ribosome Experiments
 Ribosome is a system that extends programmable switches with external memory (to store packets) and external general-purpose packet processing devices such as CPUs or FPGAs (to perform stateful operations). It leverages spare bandwidth from any directly connected servers to store the incoming payloads through RDMA.
 
 This repository contains multiple experiments implemented by [FastClick][Fastclick] and [NPF][NPF] to measure the benefits of Ribosome on the performance of Network Functions (NFs).
@@ -56,8 +56,6 @@ Also, do not forget to setup hugepages. To do so, you can modify `GRUB_CMDLINE_L
 ```
 GRUB_CMDLINE_LINUX="isolcpus=0,1,2,3,4,5,6,7,8,9 iommu=pt intel_iommu=on default_hugepagesz=1G hugepagesz=1G hugepages=32 acpi=on selinux=0 audit=0 nosoftlockup processor.max_cstate=1 intel_idle.max_cstate=0 intel_pstate=on nopti nospec_store_bypass_disable nospectre_v2 nospectre_v1 nospec l1tf=off netcfg/do_not_use_netplan=true mitigations=off"
 ```
-
-
 
 [FastClick]: https://github.com/tbarbette/fastclick
 [NPF]: https://github.com/tbarbette/npf
